@@ -180,7 +180,7 @@ def insertWord(n_url, sen_num, w_text, w_type, orig_text):
 ## main
 ##
 
-logging.basicConfig(filename='fetchnews.log',level=logging.INFO)
+logging.basicConfig(filename='fetchnews.log',level=logging.ERROR)
 logging.basicConfig(format='%(asctime)s %(message)s')
 
 homedir = os.path.expanduser('~')
