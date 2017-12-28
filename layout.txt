@@ -1,0 +1,35 @@
+
+:Nstory
+__________
+
+url [unique]
+title
+pubDaySec [integer]
+
+_____________
+
+
+
+:Sentence
+_____________
+
+numInNstory [integer]
+
+
+
+
+________________
+
+:Word
+___________
+
+text [unique]
+type
+origtext
+
+
+
+
+
+
+
