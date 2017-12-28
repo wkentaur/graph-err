@@ -160,6 +160,7 @@ def insertWord(n_url, sen_num, w_text, w_type, orig_text):
 			"MATCH (nstory:Nstory {url: {inUrl}})-[]-(sentence:Sentence {numInNstory: toInteger({inNum})}) "
 			"MERGE (word:Word {text: {inText}}) "
 			"ON CREATE SET word.type = {inType}, word.origtext = {inOrigtext} "
+			"ON MATCH SET word.type = {inType}, word.origtext = {inOrigtext} "
 			"MERGE (sentence)-[senword:HAS]->(word) "
 			"ON CREATE SET senword.count = 1 "
 			"ON MATCH SET senword.count = senword.count + 1", {'inUrl': n_url, 'inNum': sen_num, 'inText': w_text, 'inType': w_type, 'inOrigtext': orig_text}
@@ -169,6 +170,7 @@ def insertWord(n_url, sen_num, w_text, w_type, orig_text):
 			"MATCH (nstory:Nstory {url: {inUrl}})-[]-(sentence:Sentence {numInNstory: toInteger({inNum})}) "
 			"MERGE (word:Word {text: {inText}}) "
 			"ON CREATE SET word.type = {inType} "
+			"ON MATCH SET word.type = {inType} "
 			"MERGE (sentence)-[senword:HAS]->(word) "
 			"ON CREATE SET senword.count = 1 "
 			"ON MATCH SET senword.count = senword.count + 1", {'inUrl': n_url, 'inNum': sen_num, 'inText': w_text, 'inType': w_type}
@@ -180,7 +182,7 @@ def insertWord(n_url, sen_num, w_text, w_type, orig_text):
 ## main
 ##
 
-logging.basicConfig(filename='fetchnews.log',level=logging.ERROR)
+logging.basicConfig(filename='fetchnews.log',level=logging.INFO)
 logging.basicConfig(format='%(asctime)s %(message)s')
 
 homedir = os.path.expanduser('~')
