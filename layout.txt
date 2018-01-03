@@ -1,14 +1,17 @@
+(:Nstory)-[:HAS]->(:Sentence)-[:HAS]->(:LocalWord)-[:IS]->(:Term)
+(:Nstory)-[:PUBLISHED_ON]->(:Day)
+(:Nstory)-[:EDITED_BY]->(:Editor)
+_____________
 
 :Nstory
-__________
+_____________
 
 url [unique]
 title
 pubDaySec [integer]
 
+
 _____________
-
-
 
 :Sentence
 _____________
@@ -16,17 +19,33 @@ _____________
 numInNstory [integer]
 
 
+_____________
 
+:LocalWord
+_____________
 
-________________
-
-:Word
-___________
-
-text [unique]
+text [index]
 type
-origtext
+origtext [optional]
 
+
+_____________
+
+:Term
+_____________
+
+id [unique]
+text [index]
+type
+fuzzy [optional]
+
+
+_____________
+
+:Editor
+_____________
+
+name [unique]
 
 
 
