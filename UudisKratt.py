@@ -26,6 +26,7 @@ class UudisKratt():
 
 		if (article_url):
 			f = urllib.request.urlopen(article_url)
+			# FIXME check for HTTP errors
 			html_data = f.read()
 
 			soup = BeautifulSoup(html_data, "lxml")
@@ -46,32 +47,41 @@ class UudisKratt():
 				title = m_title["content"]
 
 			art_text = soup.find("article") 
-
 			timezone = "GMT+02:00"
-			self.insertNews(article_url, title, pub_date, timezone)
 
-			editor_txt = art_text.find("p", {'class': 'editor'})
-			if (editor_txt):
-				editor_txt = editor_txt.find("span", {'class': 'name'})
-			if (editor_txt and len(editor_txt) > 0):
-				self.insertEditor(article_url, editor_txt.text)
+			if (art_text and len(pub_date) > 0):
+				self.insertNews(article_url, title, pub_date, timezone)
 
-			for row in art_text.find_all("p", {'class': None}) :
-				out_text = "%s%s" % (out_text, row.text)
+				editor_txt = art_text.find("p", {'class': 'editor'})
+				if (editor_txt):
+					editor_txt = editor_txt.find("span", {'class': 'name'})
+				if (editor_txt and len(editor_txt) > 0):
+					if (editor_txt.text.find(',') > 0):
+						for editor in editor_txt.text.split(','):
+							self.insertEditor( article_url, editor.strip() )
+					else:
+						self.insertEditor( article_url, editor_txt.text.strip() )
 
-			self.analyzeText(out_text, article_url)
-			return True
+				for row in art_text.find_all("p", {'class': None}) :
+					out_text = "%s %s" % (out_text, row.text)
+
+				self.analyzeText(out_text, article_url)
+				return True
+			else:
+				logging.error("Malformed content at url: %s" % (article_url))
 
 		return False
 
 	def insertNews(self, url, title, published, timezone):
 
-		if ( url and not self.getNewsNode(url) ):
+		if (url):
+			#FIXME
 			timePart = published.split(" ")[1]
 			pubDaySec = self.getSec(timePart)
 			pubTimestamp = int(time.mktime(datetime.datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timetuple()))*1000
 			self.graph.run(
-			"CREATE (ns:Nstory {url: {inUrl}, title: {inTitle}, pubDaySec: toInteger({inPubDaySec})}) "
+			"MERGE (ns:Nstory {url: {inUrl}}) "
+			"SET ns.title = {inTitle}, ns.pubDaySec = toInteger({inPubDaySec}) "
 			"WITH ns "
 			"CALL ga.timetree.events.attach({node: ns, time: {inTimestamp}, timezone: '{inTz}', relationshipType: 'PUBLISHED_ON'}) "
 			"YIELD node RETURN node ", 
@@ -270,13 +280,18 @@ class UudisKratt():
 	def checkForLocalWords(self, inUrl):
 
 		newsNode = self.getNewsNode(inUrl)
+		sen_count = 0
 		for rel in self.graph.match(start_node=newsNode, rel_type="HAS"):
 			sentence = rel.end_node()
+			sen_count += 1
 			sWordRels = self.graph.match(start_node=sentence, rel_type="HAS")
 			if (next(sWordRels, None)  == None):
 				logging.info("dead end sentence for url: %s ...fetching article" % (inUrl, ))
 				self.fetchArticle(inUrl)
 				return
+		if (sen_count == 0):
+			logging.info("no sentences for url: %s ...fetching article" % (inUrl, ))
+			self.fetchArticle(inUrl)
 		return
 
 	def insertTerm(self, wText, wType, wId):
@@ -312,6 +327,27 @@ class UudisKratt():
 			, {'termId': termId, 'wText': wText, 'wType': wType, 'wId': wId}
 			)
 		return
+
+	def checkNewsUrl(self, origUrl):
+		f = urllib.request.urlopen(origUrl)
+		# FIXME check for HTTP errors
+		reqUrl = f.geturl()
+		if (reqUrl != origUrl):
+			if (self.getNewsNode(reqUrl)):
+				# FIXME delete old Nstory node ?
+				logging.info("node with url %s is duplicate" % (origUrl) )
+				return reqUrl
+			logging.info("url %s redirected, updating news node" % (origUrl) )
+			results = self.graph.data(
+			"MATCH (n:Nstory {url: {origUrl} }) "
+			"SET n.url = {reqUrl} "
+			"RETURN n.url "
+			"LIMIT 1 " 
+			, {'origUrl': origUrl, 'reqUrl': reqUrl} 
+			)
+			if (len(results) > 0):
+				return results[0]['n.url']
+		return origUrl
 
 	def getTermByWord(self, wText, wType):
 		results = self.graph.data(
