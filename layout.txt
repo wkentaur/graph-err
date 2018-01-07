@@ -9,7 +9,7 @@ _____________
 url [unique]
 title
 pubDaySec [integer]
-
+ver
 
 _____________
 
