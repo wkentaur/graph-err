@@ -1,5 +1,6 @@
 CREATE CONSTRAINT ON (n:Nstory) ASSERT n.url IS UNIQUE;
 CREATE INDEX ON :LocalWord(text);
+CREATE INDEX ON :LocalWord(type);
 
 CREATE CONSTRAINT ON (t:Term) ASSERT t.id IS UNIQUE;
 CREATE INDEX ON :Term(text);

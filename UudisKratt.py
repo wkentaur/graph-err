@@ -13,7 +13,8 @@ import logging
 
 class UudisKratt():
 
-	VERSION = "2"
+	VERSION = "3"
+	MAX_TEXT_LEN = 90000
 
 	def __init__(self):
 
@@ -56,6 +57,10 @@ class UudisKratt():
 				soup = BeautifulSoup(html_data, "lxml")
 				##<meta property="article:modified_time" content="2016-12-14T10:49:25+02:00" />
 				mod_date = soup.find("meta",  property="article:modified_time")
+				cat_match = soup.find("meta",  property="article:section")
+				category = ''
+				if (cat_match):
+					category = cat_match["content"]
 
 				pub_date = ''
 				if (mod_date):
@@ -73,7 +78,7 @@ class UudisKratt():
 				timezone = "GMT+02:00"
 
 				if (art_text and len(pub_date) > 0):
-					self.insertNews(article_url, title, pub_date, timezone)
+					self.insertNews(article_url, title, pub_date, timezone, category)
 
 					editor_txt = art_text.find("p", {'class': 'editor'})
 					if (editor_txt):
@@ -91,27 +96,38 @@ class UudisKratt():
 						row_text = row.get_text(separator=u' ')
 						out_text = "%s %s" % (out_text, row_text)
 
-					self.analyzeText(out_text, article_url)
-					return True
+					retval = self.analyzeText(out_text, article_url)
+					return retval
 				else:
 					logging.error("Malformed content at url: %s" % (article_url))
 
 		return False
 
-	def insertNews(self, url, title, published, timezone):
+	def insertNews(self, url, title, published, timezone, category):
 
 		if (url and published.find(" ") > 0):
 			time_part = published.split(" ")[1]
 			pub_day_sec = self.getSec(time_part)
 			pub_timestamp = int(time.mktime(datetime.datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timetuple()))*1000
-			self.graph.run(
-			"MERGE (ns:Nstory {url: {inUrl}}) "
-			"SET ns.title = {inTitle}, ns.pubDaySec = toInteger({inPubDaySec}), ns.ver = {inVer} "
-			"WITH ns "
-			"CALL ga.timetree.events.attach({node: ns, time: {inTimestamp}, timezone: '{inTz}', relationshipType: 'PUBLISHED_ON'}) "
-			"YIELD node RETURN node ", 
-			{'inUrl': url, 'inTitle': title, 'inPubDaySec': pub_day_sec, 'inVer': UudisKratt.VERSION , 'inTimestamp': pub_timestamp, 'inTz': timezone}
-			)
+			if (category):
+				self.graph.run(
+				"MERGE (ns:Nstory {url: {inUrl}}) "
+				"SET ns.title = {inTitle}, ns.pubDaySec = toInteger({inPubDaySec}), ns.category = {inCat}, ns.ver = {inVer} "
+				"WITH ns "
+				"CALL ga.timetree.events.attach({node: ns, time: {inTimestamp}, timezone: '{inTz}', relationshipType: 'PUBLISHED_ON'}) "
+				"YIELD node RETURN node ", 
+				{'inUrl': url, 'inTitle': title, 'inPubDaySec': pub_day_sec, 'inCat': category, 'inVer': UudisKratt.VERSION , 'inTimestamp': pub_timestamp, 'inTz': timezone}
+				)
+			else:
+				self.graph.run(
+				"MERGE (ns:Nstory {url: {inUrl}}) "
+				"SET ns.title = {inTitle}, ns.pubDaySec = toInteger({inPubDaySec}), ns.ver = {inVer} "
+				"WITH ns "
+				"CALL ga.timetree.events.attach({node: ns, time: {inTimestamp}, timezone: '{inTz}', relationshipType: 'PUBLISHED_ON'}) "
+				"YIELD node RETURN node ", 
+				{'inUrl': url, 'inTitle': title, 'inPubDaySec': pub_day_sec, 'inVer': UudisKratt.VERSION , 'inTimestamp': pub_timestamp, 'inTz': timezone}
+				)
+			#FIXME if new PUBLISHED_ON rel is added, remove old PUBLISHED_ON relation
 		return
 
 	def insertEditor(self, url, editor):
@@ -130,71 +146,76 @@ class UudisKratt():
 
 	def analyzeText(self, in_text, article_url):
 
-		text = Text(in_text)
-		
-		sentence_count = 0
-		count = 0
-		prev_sen_num = -1
-		for named_entity in text.named_entities:
-			ne_words = named_entity.split()
-			orig_words = text.named_entity_texts[count].split()
-			orig_text = text.named_entity_texts[count]
+		if (len(in_text) < UudisKratt.MAX_TEXT_LEN ):
+			text = Text(in_text)
 			
-			word_count = 0
-			out_entity = u''
-			for ne_word in ne_words:
-				if (word_count > len(orig_words)-1 ):
-					break
-				if (word_count):
-					out_entity = "%s " % (out_entity)
-				#last word  
-				if (word_count == (len( ne_words )-1) ):
-					new_word = ne_word
-					if ( orig_words[word_count].isupper() ):
-						new_word = new_word.upper()
-					elif ( len(orig_words[word_count])>1 and orig_words[word_count][1].isupper() ):
-						new_word = new_word.upper()
-					elif ( orig_words[word_count][0].isupper() ):
-						new_word = new_word.title()
-					#Jevgeni Ossinovsk|Ossinovski
-					if (out_entity and new_word.find('|') > 0 ):
-						word_start = out_entity
-						out_ent2 = ''
-						for word_part in new_word.split('|'):
-							if (out_ent2):
-								out_ent2 = "%s|" % (out_ent2)
-							out_ent2 = "%s%s%s" % (out_ent2, word_start, word_part)
-						out_entity = out_ent2
+			sentence_count = 0
+			count = 0
+			prev_sen_num = -1
+			for named_entity in text.named_entities:
+				ne_words = named_entity.split()
+				orig_words = text.named_entity_texts[count].split()
+				orig_text = text.named_entity_texts[count]
+				
+				word_count = 0
+				out_entity = u''
+				for ne_word in ne_words:
+					if (word_count > len(orig_words)-1 ):
+						break
+					if (word_count):
+						out_entity = "%s " % (out_entity)
+					#last word  
+					if (word_count == (len( ne_words )-1) ):
+						new_word = ne_word
+						if ( orig_words[word_count].isupper() ):
+							new_word = new_word.upper()
+						elif ( len(orig_words[word_count])>1 and orig_words[word_count][1].isupper() ):
+							new_word = new_word.upper()
+						elif ( orig_words[word_count][0].isupper() ):
+							new_word = new_word.title()
+						#Jevgeni Ossinovsk|Ossinovski
+						if (out_entity and new_word.find('|') > 0 ):
+							word_start = out_entity
+							out_ent2 = ''
+							for word_part in new_word.split('|'):
+								if (out_ent2):
+									out_ent2 = "%s|" % (out_ent2)
+								out_ent2 = "%s%s%s" % (out_ent2, word_start, word_part)
+							out_entity = out_ent2
+						else:
+							out_entity = "%s%s" % (out_entity, new_word)
+					
 					else:
-						out_entity = "%s%s" % (out_entity, new_word)
+						out_entity = "%s%s" % (out_entity, orig_words[word_count])
+					
+					word_count += 1
 				
-				else:
-					out_entity = "%s%s" % (out_entity, orig_words[word_count])
+				ne_endpos = text.named_entity_spans[count][1]
+				while (ne_endpos > text.sentence_ends[sentence_count]):
+					sentence_count += 1
 				
-				word_count += 1
-			
-			ne_endpos = text.named_entity_spans[count][1]
-			while (ne_endpos > text.sentence_ends[sentence_count]):
-				sentence_count += 1
-			
-			## Rupert Colville'i
-			## Birsbane’is
-			if ( out_entity.find("'") > 0 or out_entity.find("’") > 0 ):
-				out_entity = re.sub(u"^(.+?)[\'\’]\w*", u"\\1", out_entity)
-			w_type = text.named_entity_labels[count]
-			
-			if (sentence_count != prev_sen_num):
-				self.insertSentence(article_url, sentence_count)
-				prev_sen_num = sentence_count
-			
-			self.insertWord(article_url, sentence_count, out_entity, w_type, orig_text)
+				## Rupert Colville'i
+				## Birsbane’is
+				if ( out_entity.find("'") > 0 or out_entity.find("’") > 0 ):
+					out_entity = re.sub(u"^(.+?)[\'\’]\w*", u"\\1", out_entity)
+				w_type = text.named_entity_labels[count]
+				
+				if (sentence_count != prev_sen_num):
+					self.insertSentence(article_url, sentence_count)
+					prev_sen_num = sentence_count
+				
+				self.insertWord(article_url, sentence_count, out_entity, w_type, orig_text)
 
-			count += 1
+				count += 1
+			return True
+		else:
+			logging.error("text size exceeds limit! url: %s" % (article_url) )
+			return False
 
 	def insertSentence(self, article_url, sentence_num):
 
 		results = self.graph.data(
-		"MATCH (nstory:Nstory {url: {inUrl} })-[]-(sentence:Sentence {numInNstory: toInteger({inNum})}) RETURN sentence LIMIT 1 ", 
+		"MATCH (nstory:Nstory {url: {inUrl} })--(sentence:Sentence {numInNstory: toInteger({inNum})}) RETURN sentence LIMIT 1 ", 
 		{'inUrl': article_url, 'inNum': sentence_num} 
 		)
 
@@ -222,7 +243,7 @@ class UudisKratt():
 			
 			if (w_text.find('|') > 0):
 				self.graph.run(
-				"MATCH (nstory:Nstory {url: {inUrl}})-[]-(sentence:Sentence {numInNstory: toInteger({inNum})}) "
+				"MATCH (nstory:Nstory {url: {inUrl}})--(sentence:Sentence {numInNstory: toInteger({inNum})}) "
 				"CREATE (word:LocalWord {text: {inText}}) "
 				"SET word.type = {inType}, word.origtext = {inOrigtext} "
 				"MERGE (sentence)-[senword:HAS]->(word) "
@@ -231,7 +252,7 @@ class UudisKratt():
 				)
 			else:
 				self.graph.run(
-				"MATCH (nstory:Nstory {url: {inUrl}})-[]-(sentence:Sentence {numInNstory: toInteger({inNum})}) "
+				"MATCH (nstory:Nstory {url: {inUrl}})--(sentence:Sentence {numInNstory: toInteger({inNum})}) "
 				"CREATE (word:LocalWord {text: {inText}}) "
 				"SET word.type = {inType} "
 				"MERGE (sentence)-[senword:HAS]->(word) "
@@ -239,9 +260,11 @@ class UudisKratt():
 				, {'inUrl': n_url, 'inNum': sen_num, 'inText': w_text, 'inType': w_type}
 				)
 		else:
+				#FIXME return LocalWord on first connection match
 				self.graph.run(
-				"MATCH (nstory:Nstory {url: {inUrl}})-[]-(sentence:Sentence {numInNstory: toInteger({inNum})}) "
+				"MATCH (nstory:Nstory {url: {inUrl}})--(sentence:Sentence {numInNstory: toInteger({inNum})}) "
 				"MATCH (nstory:Nstory {url: {inUrl} })--()--(word:LocalWord {text: {inText}, type: {inType} }) "
+				"WITH DISTINCT sentence, word "
 				"MERGE (sentence)-[senword:HAS]->(word) "
 				"ON CREATE SET senword.count = 1 "
 				"ON MATCH SET senword.count = senword.count + 1 "
@@ -381,4 +404,31 @@ class UudisKratt():
 		else:
 			return None
 
+	def mergeTermInto(self, firstTerm, targetTerm):
+
+		if( len(firstTerm)>0 and len(targetTerm)>0 ):
+			res_cursor = self.graph.run(
+			"MATCH (first:Term {id: {firstId} })--(w:LocalWord) "
+			"MATCH (target:Term {id: {targetId} }) "
+			"MERGE (w)-[:IS]->(target) "
+			"RETURN w.text "
+			, {'firstId': firstTerm, 'targetId': targetTerm} 
+			)
+			
+			if res_cursor.forward():
+				del_cursor = self.graph.run(
+				"MATCH (first:Term {id: {firstId} }) "
+				"DETACH DELETE(first) "
+				, {'firstId': firstTerm} 
+				)
+				
+				results = self.graph.run(
+				"MATCH (t:Term {id: {targetId} })-[r]-(:LocalWord) "
+				"WITH t, count(r) AS in_count "
+				"SET t.incoming = in_count "
+				, {'targetId': targetTerm}
+				)
+				return True
+		return False
+	
 ###########UudisKratt.py

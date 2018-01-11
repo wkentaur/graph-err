@@ -8,15 +8,16 @@ _____________
 
 url [unique]
 title
+category
 pubDaySec [integer]
-ver
+ver									#text analyzer version
 
 _____________
 
 :Sentence
 _____________
 
-numInNstory [integer]
+numInNstory [integer]				#number of sentence in news text
 
 
 _____________
@@ -25,7 +26,7 @@ _____________
 _____________
 
 text [index]
-type
+type [index]						#values: 'LOC', 'ORG', 'PER'
 origtext [optional]
 
 
@@ -36,9 +37,9 @@ _____________
 
 id [unique]
 text [index]
-type
-fuzzy [optional]
-
+type								#values: 'LOC', 'ORG', 'PER'
+fuzzy [optional]					#values: "true"
+incoming [integer]					#count incoming LocalWord links
 
 _____________
 

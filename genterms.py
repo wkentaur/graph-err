@@ -17,11 +17,17 @@ results = actor.graph.data(
 "LIMIT 1000 "
 )
 
-
 news_count = 0
 
 for row in results:
 	actor.genNewsTerms(row['n.url'])
 	news_count += 1
+
+#update incoming links count
+results = actor.graph.run(
+"MATCH (t:Term)-[r]-(:LocalWord) "
+"WITH t, count(r) AS in_count "
+"SET t.incoming = in_count "
+)
 
 logging.info ("Generated terms for %d news." % (news_count, ))

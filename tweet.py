@@ -32,6 +32,7 @@ time_now = int(time.time()*1000)
 results = actor.graph.data(
 "CALL ga.timetree.events.single({time: {inTime}}) YIELD node "
 "MATCH(t:Term)<--(w:LocalWord)<-[sw]-(s:Sentence)<--(node) "
+"WHERE NOT t.text IN ['ETV', 'ERR'] "
 "RETURN DISTINCT t.text, count(sw) as sen_count "
 "ORDER BY sen_count DESC "
 "LIMIT 50 "

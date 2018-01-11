@@ -11,6 +11,7 @@ import logging
 logging.basicConfig(filename='log/fetchnews.log',level=logging.INFO)
 logging.basicConfig(format='%(asctime)s %(message)s')
 
+startTime = time.time()
 rss_url = 'http://uudised.err.ee/rss'
 excl_cats = ['Viipekeelsed uudised', 'ETV uudistesaated', 'Ilm', 'Tele/raadio']
 
@@ -30,4 +31,5 @@ for rss_item in soup.find_all('item'):
 			if ( actor.fetchArticle(latest_link) ):
 				news_count += 1
 
-logging.info ("Fetched %d news." % (news_count, ))
+runTime = time.time() - startTime
+logging.info ("Fetched %d news in %f seconds." % (news_count, runTime))
