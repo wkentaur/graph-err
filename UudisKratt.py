@@ -7,14 +7,160 @@ from urllib.error import URLError, HTTPError
 from bs4 import BeautifulSoup
 from estnltk import Text
 from py2neo import Graph
+from py2neo.ogm import GraphObject, Property, RelatedTo, RelatedFrom
+from hashlib import md5
 import re
 import time, datetime
 import logging
+
+
+class Nstory(GraphObject):
+	__primarykey__ = "url"
+
+	url = Property()
+	title = Property()
+	category = Property()
+	hash = Property()
+	pub_day_sec = Property("pubDaySec")		#int
+	ver = Property()
+
+	sentences = RelatedTo("Sentence", "HAS")
+	editors = RelatedTo("Editor", "EDITED_BY")
+	
+	sentences_dict = {}
+	words_dict = {}
+
+	def pullLocalGraph(self, graph, pullNstory=True, resetWordCount=False):
+		if (pullNstory):	graph.pull(self)
+		for sen in self.sentences:
+			self.sentences_dict[sen.num] = sen
+			for word in sen.words:
+				if (word.type not in self.words_dict):
+					self.words_dict[word.type] = {}
+				self.words_dict[word.type][word.text] = word
+				if (resetWordCount):
+					props = {}
+					props['count'] = 0
+					sen.words.update(word, props)
+
+	def pushLocalGraph(self, graph):
+		graph.push(self)
+		for sen in self.sentences:
+			logging.info("Pushing sentence: %d" % (sen.num) )
+			graph.push(sen)
+
+	def attachTimetree(self, graph, pub_date_time, pub_timezone):
+		if ( pub_date_time.find(' ') > 0 ):
+			prev_date = self.getPubDate(graph)
+			pub_date = pub_date_time.split(' ')[0]
+			if (prev_date):
+				if (prev_date < pub_date):
+					graph.run(
+					"MATCH (ns:Nstory {url: {inUrl}})-[rel]->(:Day) "
+					"WITH rel LIMIT 1 " 
+					"DELETE rel ", 
+					{'inUrl': self.url}
+					)
+				elif(prev_date > pub_date):
+					logging.error("Previous pub_date is bigger than new pub_date")
+					return
+			pub_timestamp = int(time.mktime(datetime.datetime.strptime(pub_date_time, "%Y-%m-%d %H:%M:%S").timetuple()))*1000
+			graph.run(
+			"MATCH (ns:Nstory {url: {inUrl}}) "
+			"CALL ga.timetree.events.attach({node: ns, time: {inTimestamp}, timezone: '{inTz}', relationshipType: 'PUBLISHED_ON'}) "
+			"YIELD node RETURN node ", 
+			{'inUrl': self.url, 'inTimestamp': pub_timestamp, 'inTz': pub_timezone}
+			)
+		
+	def getPubDate(self, graph):
+		results = graph.data(
+		"MATCH (n:Nstory {url: {inUrl} })-->(d:Day)<--(m:Month)<--(y:Year) "
+		"RETURN d.value, m.value, y.value "
+		"LIMIT 1 "
+		, {'inUrl': self.url} 
+		)
+		if (len(results) > 0):
+			date_str = "%s-%s-%s" % (results[0]['y.value'], results[0]['m.value'], results[0]['d.value'])
+			return date_str
+		else:
+			return None
+
+	def insertSentence(self, graph, sentence_num):
+
+		if (not sentence_num in self.sentences_dict):
+			new_sentence = Sentence()
+			new_sentence.num = sentence_num
+			##ogm class can't create temp id-s, with merge it gets internal ID from db
+			graph.merge(new_sentence)
+			self.sentences.add(new_sentence)
+			self.sentences_dict[sentence_num] = new_sentence
+			return new_sentence
+		return None
+
+	def insertWord(self, sen_num, w_text, w_type, w_orig_text):
+
+		if (sen_num in self.sentences_dict):
+			sentence = self.sentences_dict[sen_num]
+			if (w_type in self.words_dict and w_text in self.words_dict[w_type]):
+				word = self.words_dict[w_type][w_text]
+				#if (word in sentence.words):
+			else:
+				word = LocalWord()
+				if (w_type not in self.words_dict):
+					self.words_dict[w_type] = {}
+				self.words_dict[w_type][w_text] = word
+
+			word.text = w_text
+			word.type = w_type
+			if (w_text.find('|') > 0):
+				word.origtext = w_orig_text
+			props = {}
+			props['count'] = sentence.words.get(word, 'count',0) + 1
+			sentence.words.update(word, props)
+			return word
+		else:
+			raise ValueError('Sentence object doesnt exist.')
+		return None
+
+class Sentence(GraphObject):
+
+	num = Property("numInNstory")	#int
+
+	in_nstories = RelatedFrom("Nstory", "HAS")
+	words = RelatedTo("LocalWord", "HAS")
+
+class LocalWord(GraphObject):
+
+	text = Property()
+	type = Property()	#values: 'LOC', 'ORG', 'PER'
+	origtext = Property()
+
+	in_sentences = RelatedFrom("Sentence", "HAS")
+	terms = RelatedTo("Term", "IS")
+
+class Term(GraphObject):
+	__primarykey__ = "id"
+
+	text = Property()
+	type = Property()			#values: 'LOC', 'ORG', 'PER'
+	fuzzy = Property()			#values: "true"
+	incoming = Property()		#int
+
+	in_words = RelatedFrom("LocalWord", "IS")
+
+class Editor(GraphObject):
+	__primarykey__ = "name"
+
+	name = Property()
+
+	in_nstories = RelatedFrom("Nstory", "EDITED_BY")
+
 
 class UudisKratt():
 
 	VERSION = "3"
 	MAX_TEXT_LEN = 90000
+	LOCK_FILE = "graph-err.lock"		#for massive write tasks
 
 	def __init__(self):
 
@@ -52,43 +198,34 @@ class UudisKratt():
 					self.updateNewsUrl(article_url, req_url)
 					article_url = req_url
 
+				nstory = Nstory()
+				nstory.url = article_url
 				html_data = response.read()
 
 				soup = BeautifulSoup(html_data, "lxml")
-				##<meta property="article:modified_time" content="2016-12-14T10:49:25+02:00" />
-				mod_date = soup.find("meta",  property="article:modified_time")
 				cat_match = soup.find("meta",  property="article:section")
-				category = ''
 				if (cat_match):
-					category = cat_match["content"]
+					nstory.category = cat_match["content"]
 
 				pub_date = ''
+				pub_timezone = ''
+				##<meta property="article:modified_time" content="2016-12-14T10:49:25+02:00" />
+				mod_date = soup.find("meta",  property="article:modified_time")
 				if (mod_date):
-					match_date = re.search("^(\d+-\d+-\d+)T(\d+:\d+:\d+)", mod_date["content"])
+					match_date = re.search("^(\d+-\d+-\d+)T(\d+:\d+:\d+)\+(\d+:\d+)", mod_date["content"])
 					if match_date:
+						nstory.pub_day_sec = self.getSec(match_date.group(2))
 						pub_date = "%s %s" % (match_date.group(1), match_date.group(2))
+						pub_timezone = "GMT+%s" % (match_date.group(3) )
 
 				#title
-				title = ''
 				m_title = soup.find("meta",  property="og:title")
 				if (m_title):
-					title = m_title["content"]
+					nstory.title = m_title["content"]
 
 				art_text = soup.find("article") 
-				timezone = "GMT+02:00"
 
-				if (art_text and len(pub_date) > 0):
-					self.insertNews(article_url, title, pub_date, timezone, category)
-
-					editor_txt = art_text.find("p", {'class': 'editor'})
-					if (editor_txt):
-						editor_txt = editor_txt.find("span", {'class': 'name'})
-					if (editor_txt and len(editor_txt) > 0):
-						if (editor_txt.text.find(',') > 0):
-							for editor in editor_txt.text.split(','):
-								self.insertEditor( article_url, editor.strip() )
-						else:
-							self.insertEditor( article_url, editor_txt.text.strip() )
+				if (art_text and pub_date and pub_timezone):
 
 					for html_break in art_text.find_all('br'):
 						html_break.replace_with('; ')
@@ -96,57 +233,40 @@ class UudisKratt():
 						row_text = row.get_text(separator=u' ')
 						out_text = "%s %s" % (out_text, row_text)
 
-					retval = self.analyzeText(out_text, article_url)
+					nstory.hash = self.texthash(out_text)
+					
+					#merge to db
+					self.graph.merge(nstory)
+					nstory.attachTimetree(self.graph, pub_date, pub_timezone)
+
+					editor_txt = art_text.find("p", {'class': 'editor'})
+					if (editor_txt):
+						editor_txt = editor_txt.find("span", {'class': 'name'})
+						if (len(editor_txt) > 0):
+							for editor_str in editor_txt.text.split(','):
+								editor = Editor()
+								editor.name = editor_str.strip()
+								nstory.editors.add(editor)
+
+					retval = self.analyzeText(out_text, nstory)
 					return retval
 				else:
 					logging.error("Malformed content at url: %s" % (article_url))
-
 		return False
 
-	def insertNews(self, url, title, published, timezone, category):
-
-		if (url and published.find(" ") > 0):
-			time_part = published.split(" ")[1]
-			pub_day_sec = self.getSec(time_part)
-			pub_timestamp = int(time.mktime(datetime.datetime.strptime(published, "%Y-%m-%d %H:%M:%S").timetuple()))*1000
-			if (category):
-				self.graph.run(
-				"MERGE (ns:Nstory {url: {inUrl}}) "
-				"SET ns.title = {inTitle}, ns.pubDaySec = toInteger({inPubDaySec}), ns.category = {inCat}, ns.ver = {inVer} "
-				"WITH ns "
-				"CALL ga.timetree.events.attach({node: ns, time: {inTimestamp}, timezone: '{inTz}', relationshipType: 'PUBLISHED_ON'}) "
-				"YIELD node RETURN node ", 
-				{'inUrl': url, 'inTitle': title, 'inPubDaySec': pub_day_sec, 'inCat': category, 'inVer': UudisKratt.VERSION , 'inTimestamp': pub_timestamp, 'inTz': timezone}
-				)
-			else:
-				self.graph.run(
-				"MERGE (ns:Nstory {url: {inUrl}}) "
-				"SET ns.title = {inTitle}, ns.pubDaySec = toInteger({inPubDaySec}), ns.ver = {inVer} "
-				"WITH ns "
-				"CALL ga.timetree.events.attach({node: ns, time: {inTimestamp}, timezone: '{inTz}', relationshipType: 'PUBLISHED_ON'}) "
-				"YIELD node RETURN node ", 
-				{'inUrl': url, 'inTitle': title, 'inPubDaySec': pub_day_sec, 'inVer': UudisKratt.VERSION , 'inTimestamp': pub_timestamp, 'inTz': timezone}
-				)
-			#FIXME if new PUBLISHED_ON rel is added, remove old PUBLISHED_ON relation
-		return
-
-	def insertEditor(self, url, editor):
-		if (url and editor):
-			self.graph.run(
-			"MATCH (ns:Nstory {url: {inUrl}}) "
-			"MERGE (editor:Editor {name: {inEditor}}) "
-			"MERGE (ns)-[:EDITED_BY]->(editor)"
-			, {'inUrl': url, 'inEditor': editor }
-			)
-		return
+	def texthash(self, text):
+		return md5(text.encode('utf-8')).hexdigest()
 
 	def getSec(self, time_str):
 		h, m, s = time_str.split(':')
 		return int(h) * 3600 + int(m) * 60 + int(s)
 
-	def analyzeText(self, in_text, article_url):
+	def analyzeText(self, in_text, nstory):
 
 		if (len(in_text) < UudisKratt.MAX_TEXT_LEN ):
+			pullNstory = False
+			resetWordCount = True
+			nstory.pullLocalGraph(self.graph, pullNstory, resetWordCount)
 			text = Text(in_text)
 			
 			sentence_count = 0
@@ -201,76 +321,20 @@ class UudisKratt():
 				w_type = text.named_entity_labels[count]
 				
 				if (sentence_count != prev_sen_num):
-					self.insertSentence(article_url, sentence_count)
+					nstory.insertSentence(self.graph, sentence_count)
 					prev_sen_num = sentence_count
 				
-				self.insertWord(article_url, sentence_count, out_entity, w_type, orig_text)
+				nstory.insertWord(sentence_count, out_entity, w_type, orig_text)
 
 				count += 1
+			nstory.pushLocalGraph(self.graph)
 			return True
 		else:
 			logging.error("text size exceeds limit! url: %s" % (article_url) )
 			return False
 
-	def insertSentence(self, article_url, sentence_num):
-
-		results = self.graph.data(
-		"MATCH (nstory:Nstory {url: {inUrl} })--(sentence:Sentence {numInNstory: toInteger({inNum})}) RETURN sentence LIMIT 1 ", 
-		{'inUrl': article_url, 'inNum': sentence_num} 
-		)
-
-		if (len(results)==0):
-			self.graph.run(
-			"MATCH (nstory:Nstory {url: {inUrl} }) "
-			"CREATE (sentence:Sentence {numInNstory: toInteger({inNum})}) "
-			"MERGE (nstory)-[:HAS]->(sentence)", {'inUrl': article_url, 'inNum': sentence_num}
-			)
-
-
 	def getNewsNode(self, url):
 		return self.graph.find_one('Nstory', property_key='url', property_value=url)  
-
-
-	def insertWord(self, n_url, sen_num, w_text, w_type, orig_text):
-
-		results = self.graph.data(
-		"MATCH (:Nstory {url: {inUrl} })--(:Sentence)--(word:LocalWord {text: {inText}, type: {inType} }) "
-		"RETURN word LIMIT 1 ", 
-		{'inUrl': n_url, 'inText': w_text, 'inType': w_type} 
-		)
-		
-		if (len(results)==0):
-			
-			if (w_text.find('|') > 0):
-				self.graph.run(
-				"MATCH (nstory:Nstory {url: {inUrl}})--(sentence:Sentence {numInNstory: toInteger({inNum})}) "
-				"CREATE (word:LocalWord {text: {inText}}) "
-				"SET word.type = {inType}, word.origtext = {inOrigtext} "
-				"MERGE (sentence)-[senword:HAS]->(word) "
-				"ON CREATE SET senword.count = 1 "
-				, {'inUrl': n_url, 'inNum': sen_num, 'inText': w_text, 'inType': w_type, 'inOrigtext': orig_text}
-				)
-			else:
-				self.graph.run(
-				"MATCH (nstory:Nstory {url: {inUrl}})--(sentence:Sentence {numInNstory: toInteger({inNum})}) "
-				"CREATE (word:LocalWord {text: {inText}}) "
-				"SET word.type = {inType} "
-				"MERGE (sentence)-[senword:HAS]->(word) "
-				"ON CREATE SET senword.count = 1 "
-				, {'inUrl': n_url, 'inNum': sen_num, 'inText': w_text, 'inType': w_type}
-				)
-		else:
-				#FIXME return LocalWord on first connection match
-				self.graph.run(
-				"MATCH (nstory:Nstory {url: {inUrl}})--(sentence:Sentence {numInNstory: toInteger({inNum})}) "
-				"MATCH (nstory:Nstory {url: {inUrl} })--()--(word:LocalWord {text: {inText}, type: {inType} }) "
-				"WITH DISTINCT sentence, word "
-				"MERGE (sentence)-[senword:HAS]->(word) "
-				"ON CREATE SET senword.count = 1 "
-				"ON MATCH SET senword.count = senword.count + 1 "
-				, {'inUrl': n_url, 'inNum': sen_num, 'inText': w_text, 'inType': w_type}
-				)
-		return 
 
 	def genNewsTerms(self, url):
 
@@ -333,7 +397,8 @@ class UudisKratt():
 			sen_count += 1
 			sWordRels = self.graph.match(start_node=sentence, rel_type="HAS")
 			if (next(sWordRels, None)  == None):
-				logging.info("dead end sentence for url: %s ...fetching article" % (url, ))
+				logging.info("dead end sentence [%d] for url: %s ...fetching article" % (sentence['numInNstory'], url))
+				self.delDeadEndSentences(url)
 				self.fetchArticle(url)
 				return
 		if (sen_count == 0):
@@ -392,6 +457,20 @@ class UudisKratt():
 			return results[0]['n.url']
 		return None
 
+	def delDeadEndSentences(self, url):
+		results = self.graph.data(
+		"MATCH (n:Nstory {url: {inUrl} })-->(s:Sentence) "
+		"WHERE NOT (s)-->(:LocalWord) "
+		"WITH DISTINCT s LIMIT 50 "
+		"DETACH DELETE(s) "
+		"RETURN count(*) as del_count "
+		, {'inUrl': url} 
+		)
+		if (len(results) > 0):
+			return results[0]['del_count']
+		else:
+			return None
+
 	def getTermByWord(self, w_text, w_type):
 		results = self.graph.data(
 		"MATCH (word:LocalWord {text: {wText}, type: {wType} })--(term:Term) "
@@ -430,5 +509,5 @@ class UudisKratt():
 				)
 				return True
 		return False
-	
+
 ###########UudisKratt.py

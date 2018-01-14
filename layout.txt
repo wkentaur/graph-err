@@ -9,6 +9,7 @@ _____________
 url [unique]
 title
 category
+hash								#hash of analyzed text
 pubDaySec [integer]
 ver									#text analyzer version
 
