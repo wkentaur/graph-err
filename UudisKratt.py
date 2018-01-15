@@ -97,25 +97,30 @@ class Nstory(GraphObject):
 			return new_sentence
 		return None
 
-	def insertWord(self, sen_num, w_text, w_type, w_orig_text):
+	def insertWord(self, graph, sen_num, w_text, w_type, w_orig_text):
 
+		created_newword = False
 		if (sen_num in self.sentences_dict):
 			sentence = self.sentences_dict[sen_num]
 			if (w_type in self.words_dict and w_text in self.words_dict[w_type]):
 				word = self.words_dict[w_type][w_text]
-				#if (word in sentence.words):
 			else:
 				word = LocalWord()
 				if (w_type not in self.words_dict):
 					self.words_dict[w_type] = {}
 				self.words_dict[w_type][w_text] = word
+				created_newword = True
 
 			word.text = w_text
 			word.type = w_type
 			if (w_text.find('|') > 0):
 				word.origtext = w_orig_text
+			if (created_newword):
+				##ogm class can't create temp id-s, with merge it gets internal ID from db
+				graph.merge(word)
 			props = {}
 			props['count'] = sentence.words.get(word, 'count',0) + 1
+			logging.info("sen: %d -> %s|%s" % (sen_num, word.text, word.type))
 			sentence.words.update(word, props)
 			return word
 		else:
@@ -324,7 +329,7 @@ class UudisKratt():
 					nstory.insertSentence(self.graph, sentence_count)
 					prev_sen_num = sentence_count
 				
-				nstory.insertWord(sentence_count, out_entity, w_type, orig_text)
+				nstory.insertWord(self.graph, sentence_count, out_entity, w_type, orig_text)
 
 				count += 1
 			nstory.pushLocalGraph(self.graph)
@@ -333,6 +338,10 @@ class UudisKratt():
 			logging.error("text size exceeds limit! url: %s" % (article_url) )
 			return False
 
+	def getNstory(self, url):
+		return Nstory.select(self.graph, url).first()
+
+	#deprecated####################
 	def getNewsNode(self, url):
 		return self.graph.find_one('Nstory', property_key='url', property_value=url)  
 
@@ -441,9 +450,10 @@ class UudisKratt():
 		return
 
 	def updateNewsUrl(self, old_url, new_url):
-		if (self.getNewsNode(new_url)):
-			# FIXME delete old Nstory node ?
-			logging.info("node with url %s is duplicate" % (old_url) )
+		if (self.getNstory(new_url)):
+			logging.info("Deleting duplicate Nstory with url %s " % (old_url) )
+			dupeNstory = self.getNstory(old_url)
+			self.graph.delete(dupeNstory)
 			return new_url
 		logging.info("url %s redirected, updating news node" % (old_url) )
 		results = self.graph.data(

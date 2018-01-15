@@ -33,7 +33,7 @@ with lock:
 				if ( actor.fetchArticle(latest_link) ):
 					news_count += 1
 		runTime = time.time() - startTime
-		if (runTime > (15*60) ):
+		if (runTime > 15*60 ):
 			logging.error("Runtime limit exeeded, stopping...")
 			break
 
