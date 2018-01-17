@@ -13,7 +13,7 @@ import re
 import time, datetime
 import logging
 
-
+            
 class Nstory(GraphObject):
 	__primarykey__ = "url"
 
@@ -26,9 +26,10 @@ class Nstory(GraphObject):
 
 	sentences = RelatedTo("Sentence", "HAS")
 	editors = RelatedTo("Editor", "EDITED_BY")
-	
-	sentences_dict = {}
-	words_dict = {}
+
+	def __init__(self):
+		self.sentences_dict = {}
+		self.words_dict = {}
 
 	def pullLocalGraph(self, graph, pullNstory=True, resetWordCount=False):
 		if (pullNstory):	graph.pull(self)
@@ -44,10 +45,16 @@ class Nstory(GraphObject):
 					sen.words.update(word, props)
 
 	def pushLocalGraph(self, graph):
-		graph.push(self)
-		for sen in self.sentences:
-			logging.info("Pushing sentence: %d" % (sen.num) )
+
+		for sen in self.sentences_dict.values():
+			if (sen not in self.sentences):
+				self.sentences.add(sen)
+			logging.info("Pushing sentence: %d with %d words. " % (sen.num, len(sen.words) ) )
 			graph.push(sen)
+		logging.info("Pushing nstory")
+		graph.push(self)
+		if ( len(self.sentences) !=  len(self.sentences_dict) ):
+			raise AssertionError('Sentence counts dont match for url: %s' % (self.url) )
 
 	def attachTimetree(self, graph, pub_date_time, pub_timezone):
 		if ( pub_date_time.find(' ') > 0 ):
@@ -92,7 +99,6 @@ class Nstory(GraphObject):
 			new_sentence.num = sentence_num
 			##ogm class can't create temp id-s, with merge it gets internal ID from db
 			graph.merge(new_sentence)
-			self.sentences.add(new_sentence)
 			self.sentences_dict[sentence_num] = new_sentence
 			return new_sentence
 		return None
@@ -163,13 +169,14 @@ class Editor(GraphObject):
 
 class UudisKratt():
 
-	VERSION = "3"
+	VERSION = "4"
 	MAX_TEXT_LEN = 90000
-	LOCK_FILE = "graph-err.lock"		#for massive write tasks
+	MAX_FIELD_LEN = 150
+	LOCK_FILE = "graph-err.lock"
 
 	def __init__(self):
 
-		self.throttle_delay = 4   # sec
+		self.throttle_delay = 8   # sec
 		self.last_request_time = None
 		homedir = os.path.expanduser('~')
 		confFile = os.path.join(homedir, '.graph-err.cnf')
@@ -194,9 +201,10 @@ class UudisKratt():
 			try:
 				response = urlopen(req)
 			except HTTPError as e:
-				logging.error('HTTPError: ', e.code)
+				self.setErrorNstory(article_url)
+				logging.error('HTTPError: %d, setting ErrorNstory' % (e.code) )
 			except URLError as e:
-				logging.error('URLError: ', e.reason)
+				logging.error('URLError: %s' % (e.reason) )
 			else:
 				req_url = response.geturl()
 				if (req_url != article_url):
@@ -210,7 +218,8 @@ class UudisKratt():
 				soup = BeautifulSoup(html_data, "lxml")
 				cat_match = soup.find("meta",  property="article:section")
 				if (cat_match):
-					nstory.category = cat_match["content"]
+					nstory.category = cat_match["content"][:UudisKratt.MAX_FIELD_LEN]
+				nstory.ver = UudisKratt.VERSION
 
 				pub_date = ''
 				pub_timezone = ''
@@ -226,7 +235,7 @@ class UudisKratt():
 				#title
 				m_title = soup.find("meta",  property="og:title")
 				if (m_title):
-					nstory.title = m_title["content"]
+					nstory.title = m_title["content"][:UudisKratt.MAX_FIELD_LEN]
 
 				art_text = soup.find("article") 
 
@@ -240,7 +249,7 @@ class UudisKratt():
 
 					nstory.hash = self.texthash(out_text)
 					
-					#merge to db
+					logging.info("Updating Nstory: %s" % (article_url) )
 					self.graph.merge(nstory)
 					nstory.attachTimetree(self.graph, pub_date, pub_timezone)
 
@@ -250,7 +259,7 @@ class UudisKratt():
 						if (len(editor_txt) > 0):
 							for editor_str in editor_txt.text.split(','):
 								editor = Editor()
-								editor.name = editor_str.strip()
+								editor.name = editor_str.strip()[:UudisKratt.MAX_FIELD_LEN]
 								nstory.editors.add(editor)
 
 					retval = self.analyzeText(out_text, nstory)
@@ -277,6 +286,7 @@ class UudisKratt():
 			sentence_count = 0
 			count = 0
 			prev_sen_num = -1
+			logging.info("%s named entities: %d " % (nstory.url, len(text.named_entities) ) )
 			for named_entity in text.named_entities:
 				ne_words = named_entity.split()
 				orig_words = text.named_entity_texts[count].split()
@@ -322,7 +332,7 @@ class UudisKratt():
 				## Rupert Colville'i
 				## Birsbane’is
 				if ( out_entity.find("'") > 0 or out_entity.find("’") > 0 ):
-					out_entity = re.sub(u"^(.+?)[\'\’]\w*", u"\\1", out_entity)
+					out_entity = re.sub(u"^(.+?)[\'\’]\w{1,2}$", u"\\1", out_entity)
 				w_type = text.named_entity_labels[count]
 				
 				if (sentence_count != prev_sen_num):
@@ -466,6 +476,15 @@ class UudisKratt():
 		if (len(results) > 0):
 			return results[0]['n.url']
 		return None
+
+	def setErrorNstory(self, url):
+
+		results = self.graph.run(
+		"MATCH (n:Nstory {url: {inUrl} }) "
+		"REMOVE n:Nstory "
+		"SET n:ErrorNstory "
+		, {'inUrl': url} 
+		)
 
 	def delDeadEndSentences(self, url):
 		results = self.graph.data(
