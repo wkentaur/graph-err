@@ -50,7 +50,10 @@ _____________
 name [unique]
 
 
+_____________
 
+:ErrorNstory						#Nstory with fetching error
+_____________
 
 
 

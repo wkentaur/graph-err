@@ -69,7 +69,7 @@ class Nstory(GraphObject):
 					{'inUrl': self.url}
 					)
 				elif(prev_date > pub_date):
-					logging.error("Previous pub_date is bigger than new pub_date")
+					raise AssertionError("Previous pub_date is bigger than new pub_date, url %s" % (self.url))
 					return
 			pub_timestamp = int(time.mktime(datetime.datetime.strptime(pub_date_time, "%Y-%m-%d %H:%M:%S").timetuple()))*1000
 			graph.run(
@@ -87,7 +87,7 @@ class Nstory(GraphObject):
 		, {'inUrl': self.url} 
 		)
 		if (len(results) > 0):
-			date_str = "%s-%s-%s" % (results[0]['y.value'], results[0]['m.value'], results[0]['d.value'])
+			date_str = "%d-%02d-%02d" % (results[0]['y.value'], results[0]['m.value'], results[0]['d.value'])
 			return date_str
 		else:
 			return None
@@ -265,7 +265,8 @@ class UudisKratt():
 					retval = self.analyzeText(out_text, nstory)
 					return retval
 				else:
-					logging.error("Malformed content at url: %s" % (article_url))
+					logging.error("Malformed content at url, setting as ErrorNstory: %s" % (article_url))
+					self.setErrorNstory(article_url)
 		return False
 
 	def texthash(self, text):
