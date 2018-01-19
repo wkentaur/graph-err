@@ -23,7 +23,7 @@ with lock:
 	news_count = 0
 
 	for row in results:
-		actor.genNewsTerms(row['n.url'])
+		actor.genTerms(row['n.url'])
 		news_count += 1
 
 	#update incoming links count

@@ -170,7 +170,7 @@ class Editor(GraphObject):
 class UudisKratt():
 
 	VERSION = "4"
-	MAX_TEXT_LEN = 90000
+	MAX_TEXT_LEN = 110000
 	MAX_FIELD_LEN = 150
 	LOCK_FILE = "graph-err.lock"
 
@@ -208,7 +208,7 @@ class UudisKratt():
 			else:
 				req_url = response.geturl()
 				if (req_url != article_url):
-					self.updateNewsUrl(article_url, req_url)
+					self.updateNstoryUrl(article_url, req_url)
 					article_url = req_url
 
 				nstory = Nstory()
@@ -247,8 +247,6 @@ class UudisKratt():
 						row_text = row.get_text(separator=u' ')
 						out_text = "%s %s" % (out_text, row_text)
 
-					nstory.hash = self.texthash(out_text)
-					
 					logging.info("Updating Nstory: %s" % (article_url) )
 					self.graph.merge(nstory)
 					nstory.attachTimetree(self.graph, pub_date, pub_timezone)
@@ -343,6 +341,7 @@ class UudisKratt():
 				nstory.insertWord(self.graph, sentence_count, out_entity, w_type, orig_text)
 
 				count += 1
+			nstory.hash = self.texthash(in_text)
 			nstory.pushLocalGraph(self.graph)
 			return True
 		else:
@@ -352,11 +351,7 @@ class UudisKratt():
 	def getNstory(self, url):
 		return Nstory.select(self.graph, url).first()
 
-	#deprecated####################
-	def getNewsNode(self, url):
-		return self.graph.find_one('Nstory', property_key='url', property_value=url)  
-
-	def genNewsTerms(self, url):
+	def genTerms(self, url):
 
 		results = self.graph.data(
 		"MATCH (nstory:Nstory {url: {inUrl} })--(sentence:Sentence)--(word:LocalWord) "
@@ -410,7 +405,7 @@ class UudisKratt():
 
 	def checkForLocalWords(self, url):
 
-		newsNode = self.getNewsNode(url)
+		newsNode = self.graph.find_one('Nstory', property_key='url', property_value=url)
 		sen_count = 0
 		for rel in self.graph.match(start_node=newsNode, rel_type="HAS"):
 			sentence = rel.end_node()
@@ -460,11 +455,12 @@ class UudisKratt():
 			)
 		return
 
-	def updateNewsUrl(self, old_url, new_url):
+	def updateNstoryUrl(self, old_url, new_url):
 		if (self.getNstory(new_url)):
 			logging.info("Deleting duplicate Nstory with url %s " % (old_url) )
 			dupeNstory = self.getNstory(old_url)
-			self.graph.delete(dupeNstory)
+			if (dupeNstory):
+				self.graph.delete(dupeNstory)
 			return new_url
 		logging.info("url %s redirected, updating news node" % (old_url) )
 		results = self.graph.data(

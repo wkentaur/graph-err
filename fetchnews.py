@@ -28,7 +28,7 @@ with lock:
 
 		if (rss_item.category.string.strip() not in excl_cats):
 			latest_link = rss_item.link.string
-			newsNode = actor.getNewsNode(latest_link)
+			newsNode = actor.getNstory(latest_link)
 			if (not newsNode):
 				if ( actor.fetchArticle(latest_link) ):
 					news_count += 1
