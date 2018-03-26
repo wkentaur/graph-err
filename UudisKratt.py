@@ -353,6 +353,8 @@ class UudisKratt():
 
 	def genTerms(self, url):
 
+		added_terms = set()
+
 		results = self.graph.data(
 		"MATCH (nstory:Nstory {url: {inUrl} })--(sentence:Sentence)--(word:LocalWord) "
 		"RETURN DISTINCT word.text as text, word.type as type, id(word) as id "
@@ -362,7 +364,7 @@ class UudisKratt():
 		persons = []
 		for wordDict in results:
 			if (wordDict['type'] == 'LOC' or wordDict['type'] == 'ORG'):
-				self.insertTerm(wordDict['text'], wordDict['type'], wordDict['id'])
+				added_terms.add( self.insertTerm(wordDict['text'], wordDict['type'], wordDict['id']) )
 			elif (wordDict['type'] == 'PER'):
 				if (wordDict['text'].find(' ') > 0):
 					wordDict['surname'] = wordDict['text'].split(' ')[-1]
@@ -382,9 +384,9 @@ class UudisKratt():
 							useName = fullname
 							person['surname'] = fullname.split(' ')[-1]
 							break
-					self.insertTerm(useName, person['type'], person['id'])
+					added_terms.add( self.insertTerm(useName, person['type'], person['id']) )
 				else:
-					self.insertTerm(person['text'], person['type'], person['id'])
+					added_terms.add( self.insertTerm(person['text'], person['type'], person['id']) )
 			else:
 				#lookup if short name is surname
 				if (person['text'].find('|') > 0):
@@ -394,14 +396,14 @@ class UudisKratt():
 						if (match) :
 							useName = match['text']
 							break
-					self.insertTerm(useName, person['type'], person['id'])
+					added_terms.add( self.insertTerm(useName, person['type'], person['id']) )
 				else:
 					useName = person['text']
 					match = next((item for item in persons if item["surname"] == person['text']), None)
 					if (match) :
 						useName = match['text']
-					self.insertTerm(useName, person['type'], person['id'])
-		return
+					added_terms.add( self.insertTerm(useName, person['type'], person['id']) )
+		return added_terms
 
 	def checkForLocalWords(self, url):
 
@@ -453,7 +455,7 @@ class UudisKratt():
 			"MERGE (word)-[:IS]->(term) "
 			, {'termId': term_id, 'wText': w_text, 'wType': w_type, 'wId': w_id}
 			)
-		return
+		return term_id
 
 	def updateNstoryUrl(self, old_url, new_url):
 		if (self.getNstory(new_url)):

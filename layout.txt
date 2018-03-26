@@ -56,4 +56,4 @@ _____________
 _____________
 
 
-
+#same properties as Nstory

@@ -108,9 +108,9 @@ def checkNstoryEditor():
 			error_count = 1
 	return error_count
 
-# Nstory has MAX 800 distinct LocalWord-s
+# Nstory has MAX 1000 distinct LocalWord-s
 def checkNstoryLocalWord():
-	MAX_LOCALWORDS = 800
+	MAX_LOCALWORDS = 1000
 	error_count = 0
 	results = actor.graph.data(
 	"MATCH (w:LocalWord)--(:Sentence)--(n:Nstory) "
@@ -124,9 +124,9 @@ def checkNstoryLocalWord():
 			error_count = 1
 	return error_count
 
-# Nstory has MAX 300 Sentence-s
+# Nstory has MAX 500 Sentence-s
 def checkNstorySentence():
-	MAX_SENTENCES = 300
+	MAX_SENTENCES = 500
 	error_count = 0
 	results = actor.graph.data(
 	"MATCH (n:Nstory)--(s:Sentence) "
@@ -143,9 +143,9 @@ def checkNstorySentence():
 
 ###### SENTENCE
 
-# Sentence has MAX 200 LocalWord-s
+# Sentence has MAX 400 LocalWord-s
 def checkSentenceLocalWord():
-	MAX_LOCALWORDS = 200
+	MAX_LOCALWORDS = 400
 	error_count = 0
 	results = actor.graph.data(
 	"MATCH (s:Sentence)--(w:LocalWord) "
@@ -183,7 +183,6 @@ with lock:
 	error_count = 0
 
 	error_count += checkDayNstory()
-	error_count += checkLocalWordNstory()
 	error_count += checkLocalWordSentence()
 	error_count += checkLocalWordTerm()
 	error_count += checkLocalWordType()
@@ -192,6 +191,9 @@ with lock:
 	error_count += checkNstorySentence()
 	error_count += checkSentenceLocalWord()
 	error_count += checkSentenceNstory()
+
+	#memory hungry tasks
+	#error_count += checkLocalWordNstory()
 
 	if (error_count > 0):
 		raise AssertionError('%d data checks failed!' % (error_count) )

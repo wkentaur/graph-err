@@ -12,10 +12,13 @@ lock = filelock.FileLock(UudisKratt.LOCK_FILE)
 
 with lock:
 	actor = UudisKratt()
+	added_terms = set()
 
 	results = actor.graph.data(
-	"MATCH (n:Nstory)--()--(w:LocalWord) "
+	"MATCH (w:LocalWord) "
 	"WHERE NOT (w)-[:IS]->() "
+	"WITH w "
+	"MATCH (w)<--()<--(n:Nstory) "
 	"RETURN DISTINCT n.url "
 	"LIMIT 1000 "
 	)
@@ -23,14 +26,16 @@ with lock:
 	news_count = 0
 
 	for row in results:
-		actor.genTerms(row['n.url'])
+		addedTerms.update( actor.genTerms(row['n.url']) )
 		news_count += 1
 
 	#update incoming links count
-	results = actor.graph.run(
-	"MATCH (t:Term)-[r]-(:LocalWord) "
-	"WITH t, count(r) AS in_count "
-	"SET t.incoming = in_count "
+	for term_id in added_terms:
+		results = actor.graph.run(
+		"MATCH (t:Term {id: {termId}})-[r]-(:LocalWord) "
+		"WITH t, count(r) AS in_count "
+		"SET t.incoming = in_count "
+		, {'termId': term_id}
 	)
 
 logging.info ("Generated terms for %d news." % (news_count, ))
