@@ -438,7 +438,7 @@ class UudisKratt():
 		if (w_text.find('|') > 0):
 			self.graph.run(
 			"MERGE (term:Term {id: {termId}}) "
-			"ON CREATE SET term.text = {wText}, term.type = {wType}, term.fuzzy = 'true'"
+			"ON CREATE SET term.text = {wText}, term.type = {wType}, term.incoming = 0, term.fuzzy = 'true' "
 			"WITH term "
 			"MATCH (word:LocalWord) "
 			"WHERE id(word) = {wId} "
@@ -448,7 +448,7 @@ class UudisKratt():
 		else:
 			self.graph.run(
 			"MERGE (term:Term {id: {termId}}) "
-			"ON CREATE SET term.text = {wText}, term.type = {wType} "
+			"ON CREATE SET term.text = {wText}, term.type = {wType}, term.incoming = 0 "
 			"WITH term "
 			"MATCH (word:LocalWord) "
 			"WHERE id(word) = {wId} "
